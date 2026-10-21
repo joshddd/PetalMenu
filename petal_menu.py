@@ -9,11 +9,19 @@ v3:
   * v2 修复保留：数量对话框不能在自己的 popup 事件里 exec()，
     改为先关菜单、再延后非模态弹窗 + 强制前台聚焦。
   * petal_count 语义：先按扩展名过滤，再取前 N 个。
+
+v11:
+  * 花瓣固定从左边（9 点钟）起顺时针排列。
+  * 第一片永远是「默认打开」——走系统默认程序，配置里同名条目的 program 忽略。
+  * 第二片起显示名只认 program：系统注册名 > exe 版本信息 > 可执行文件名。
+  * 没配 program 的花瓣留白不写字，左键点它只关菜单。
 """
 import math
 import os
+import struct
 import sys
 import subprocess
+from functools import lru_cache
 
 from PyQt6.QtCore import Qt, QRectF, QVariantAnimation, QEasingCurve, QTimer
 from PyQt6.QtGui import (QColor, QPainter, QPainterPath, QFont, QCursor,
@@ -77,6 +85,15 @@ DEFAULT_PETAL_SIZE = "normal"
 COLORS = PALETTES[DEFAULT_PALETTE]["colors"]
 
 PLACEHOLDER_NAME = "未配置"
+
+# 第一片花瓣固定指向「系统默认程序」，名字固定为这个
+DEFAULT_PETAL_NAME = "默认打开"
+# 特殊程序（打开所在目录）的显示名
+EXPLORER_LABEL = "打开所在目录"
+# 空白花瓣 hover 时中心圆的提示（花瓣本身不写字）
+EMPTY_HINT = "右键设置"
+# 花瓣从左边（9 点钟方向）开始，顺时针依次排列
+START_DEG = 180.0
 
 
 def palette(name):
@@ -151,6 +168,89 @@ def _force_foreground(widget):
         pass
 
 
+def _reg_friendly_name(basename):
+    """HKCR\\Applications\\<exe>\\FriendlyAppName —— 安装时注册的程序显示名。
+
+    先查用户级再查机器级：绿色版/用户级安装的程序只写 HKCU。
+    """
+    try:
+        import winreg
+    except Exception:
+        return ""
+    key = r"Applications\%s\FriendlyAppName" % basename
+    for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        try:
+            with winreg.OpenKey(root, key) as k:
+                val, _typ = winreg.QueryValueEx(k, "")
+        except OSError:
+            continue
+        val = str(val or "").strip()
+        if val:
+            return val
+    return ""
+
+
+def _version_strings(path):
+    """读 exe 的版本资源，返回 {'FileDescription':…, 'ProductName':…}。"""
+    if sys.platform != "win32" or not os.path.exists(path):
+        return {}
+    try:
+        import ctypes
+        from ctypes import wintypes
+        ver = ctypes.windll.version
+    except Exception:
+        return {}
+    try:
+        size = ver.GetFileVersionInfoSizeW(str(path), None)
+        if not size:
+            return {}
+        buf = ctypes.create_string_buffer(size)
+        if not ver.GetFileVersionInfoW(str(path), 0, size, buf):
+            return {}
+        out = {}
+        ptr, ln = ctypes.c_void_p(), wintypes.UINT()
+        if not (ver.VerQueryValueW(buf, r"\VarFileInfo\Translation",
+                                   ctypes.byref(ptr), ctypes.byref(ln))
+                and ln.value >= 4):
+            return {}
+        lang, cp = struct.unpack("<HH", ctypes.string_at(ptr, 4))
+        for field in ("FileDescription", "ProductName"):
+            sub = r"\StringFileInfo\%04x%04x\%s" % (lang, cp, field)
+            p2, l2 = ctypes.c_void_p(), wintypes.UINT()
+            if (ver.VerQueryValueW(buf, sub, ctypes.byref(p2), ctypes.byref(l2))
+                    and l2.value):
+                # VerQueryValueW 给的长度含结尾 NUL，必须剥掉
+                val = str(ctypes.wstring_at(p2, l2.value) or "").replace("\x00", "").strip()
+                if val:
+                    out[field] = val
+        return out
+    except Exception:
+        return {}
+
+
+@lru_cache(maxsize=256)
+def program_label(program):
+    """花瓣显示名：系统注册名 > exe 版本信息 > 可执行文件名（不含 .exe）。
+
+    program 为空 -> 空字符串（花瓣留白，点一下只关菜单）。
+    """
+    prog = str(program or "").strip()
+    if not prog:
+        return ""
+    if prog == "__explorer__":
+        return EXPLORER_LABEL
+    base = os.path.basename(prog)
+    if not base:
+        return prog
+    name = _reg_friendly_name(base)
+    if not name:
+        info = _version_strings(prog)
+        name = info.get("FileDescription") or info.get("ProductName") or ""
+    if not name:
+        name = os.path.splitext(base)[0]
+    return name.strip()
+
+
 def visible_petals(petals, files, petal_count=0):
     """先按扩展名过滤，再取前 N 个；petal_count<=0 表示全部。"""
     out = []
@@ -172,22 +272,51 @@ def visible_petals(petals, files, petal_count=0):
     return out
 
 
-def build_petals(petals, files, petal_count=0):
-    """真实候选 + 数量不足时补「未配置」占位花瓣。
+def _is_legacy_default(cfg):
+    """旧版本里那条「名字叫默认打开、又没指定程序」的条目 —— 现在由固定第一片代替。
 
-    这样「设置 3 个花瓣」在任何配置下都真的显示 3 个花瓣，
-    多出来的占位花瓣右键就能绑定程序。
+    名字带程序的不算（那是用户配的一个具体程序，按程序名显示）。
     """
-    out = visible_petals(petals, files, petal_count)
-    if not petal_count or petal_count <= 0:
-        return out
-    while len(out) < petal_count:
-        out.append({
-            "name": PLACEHOLDER_NAME,
-            "program": "",
-            "_files": list(files),
-            "_placeholder": True,
-        })
+    cfg = cfg or {}
+    return (str(cfg.get("name") or "").strip() == DEFAULT_PETAL_NAME
+            and not str(cfg.get("program") or "").strip())
+
+
+def build_petals(petals, files, petal_count=0):
+    """生成菜单里真正要画的花瓣列表。
+
+    * 第一片永远固定为「默认打开」：走系统默认程序（os.startfile）。
+      配置条目只看 program，不看 name —— 旧版本那条空的「默认打开」被这里取代。
+    * 从第二片开始按配置顺序生成，显示名只认 program：
+      系统注册名 > exe 版本信息(FileDescription/ProductName) > 可执行文件名。
+    * 用户没指定 program 的花瓣显示为空白（不写任何文字），点击只关菜单；
+      花瓣数量不足时补的空位同样留白，右键可以现场绑定程序。
+    """
+    out = [{
+        "name": DEFAULT_PETAL_NAME,
+        "program": "",
+        "_label": DEFAULT_PETAL_NAME,
+        "_default": True,
+        "_files": list(files),
+    }]
+    rest_cfg = [p for p in (petals or []) if not _is_legacy_default(p)]
+    rest = visible_petals(rest_cfg, files, 0)
+    for entry in rest:
+        entry["_label"] = program_label(entry.get("program"))
+        if not entry["_label"]:
+            entry["_blank"] = True
+    if petal_count and petal_count > 0:
+        rest = rest[:max(0, int(petal_count) - 1)]
+        while len(rest) + 1 < int(petal_count):
+            rest.append({
+                "name": PLACEHOLDER_NAME,
+                "program": "",
+                "_label": "",
+                "_files": list(files),
+                "_placeholder": True,
+                "_blank": True,
+            })
+    out.extend(rest)
     return out
 
 
@@ -410,7 +539,10 @@ class PetalMenu(QWidget):
         if not self.petals:
             return -1
         deg = math.degrees(math.atan2(-dy, dx)) % 360
-        return int(deg // (360.0 / len(self.petals)))
+        span = 360.0 / len(self.petals)
+        # 花瓣从 START_DEG（左边）开始顺时针排，角度先翻到「离起始点多少度」
+        idx = int(((START_DEG - deg) % 360) // span)
+        return min(idx, len(self.petals) - 1)
 
     def _in_center(self, pos):
         c = self._size / 2
@@ -444,9 +576,7 @@ class PetalMenu(QWidget):
         return True
 
     def _launch(self, petal):
-        if petal.get("_placeholder"):
-            _notify("PetalMenu",
-                    f"这个花瓣还没配置程序：右键它选一个程序即可")
+        if petal.get("_placeholder") or not petal.get("_label"):
             return
         program = petal.get("program", "") or ""
         files = petal.get("_files") or self.files
@@ -636,10 +766,16 @@ class PetalMenu(QWidget):
             # 右键花瓣 -> 编辑程序 / 占位花瓣 -> 新建
             idx = self._petal_at(pos)
             if 0 <= idx < len(self.petals):
-                if self.petals[idx].get("_placeholder"):
+                petal = self.petals[idx]
+                if petal.get("_default"):
+                    self.close()
+                    _notify("PetalMenu",
+                            "第一片固定用系统默认程序打开，不能改；"
+                            "要指定程序请配置第二片及之后的花瓣")
+                elif petal.get("_placeholder"):
                     self._add_petal()
                 else:
-                    self._edit_petal(self.petals[idx])
+                    self._edit_petal(petal)
                 return
             self.close()
             return
@@ -652,7 +788,12 @@ class PetalMenu(QWidget):
                 return
             idx = self._petal_at(pos)
             if 0 <= idx < len(self.petals):
-                self._launch(self.petals[idx])
+                petal = self.petals[idx]
+                # 空白花瓣（没配程序）：点一下只关菜单，什么也不做
+                if petal.get("_blank") or not petal.get("_label"):
+                    self.close()
+                    return
+                self._launch(petal)
             self.close()
 
     def keyPressEvent(self, event):
@@ -671,8 +812,9 @@ class PetalMenu(QWidget):
         span = 360.0 / n
 
         for i, petal in enumerate(self.petals):
-            a0 = i * span + GAP_DEG / 2
-            a1 = (i + 1) * span - GAP_DEG / 2
+            # 第一片从左边（START_DEG）开始，顺时针依次排开
+            a0 = START_DEG - (i + 1) * span + GAP_DEG / 2
+            a1 = START_DEG - i * span - GAP_DEG / 2
             ph = bool(petal.get("_placeholder"))
             path = _sector_path(a0, a1, self.r_in, self.r_out)
             if ph:
@@ -703,11 +845,12 @@ class PetalMenu(QWidget):
             font = QFont("Microsoft YaHei UI", max(6, int(round(11 * self._k))))
             font.setBold(True)
             painter.setFont(font)
-            text = ("＋" + PLACEHOLDER_NAME) if ph else petal["name"]
-            half_w = 72 * self._k
-            half_h = 14 * self._k
-            painter.drawText(QRectF(-half_w, -half_h, 2 * half_w, 2 * half_h),
-                             int(Qt.AlignmentFlag.AlignCenter), text)
+            text = petal.get("_label") or ""
+            if text:
+                half_w = 72 * self._k
+                half_h = 14 * self._k
+                painter.drawText(QRectF(-half_w, -half_h, 2 * half_w, 2 * half_h),
+                                 int(Qt.AlignmentFlag.AlignCenter), text)
             painter.restore()
 
         # 中心圆
@@ -718,7 +861,8 @@ class PetalMenu(QWidget):
 
         # 中心提示：hover 花瓣名 / 中心可点（打开所在目录）
         if 0 <= self.hover < len(self.petals):
-            self._draw_center_text(painter, self.petals[self.hover]["name"], cr)
+            lbl = self.petals[self.hover].get("_label") or ""
+            self._draw_center_text(painter, lbl or EMPTY_HINT, cr)
         elif self._center_hover:
             self._draw_folder_glyph(painter, cr)
         else:

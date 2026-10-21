@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-"""非侵入检查：解包 exe 内嵌的字节码，确认 v10 的新功能真的进了包
+"""非侵入检查：解包 exe 内嵌的字节码，确认当前版本的新功能真的进了包
 
-用法：python _checkexe.py <目录>        # 目录里放 PetalMenu.exe（默认 dist_v9）
+用法：python _checkexe.py <目录>        # 目录里放 PetalMenu.exe（默认 dist_v11）
 """
 import glob
 import os
 import sys
 
-HERE = sys.argv[1] if len(sys.argv) > 1 else r"C:\tmp\hotkey\dist_v10"
+HERE = sys.argv[1] if len(sys.argv) > 1 else r"C:\tmp\hotkey\dist_v11"
 log = lambda *a: print(*a, flush=True)
 
 WANT = {
@@ -15,13 +15,19 @@ WANT = {
                    "_draw_center_text", "_launch",
                    # v10：配色方案 + 花瓣大小
                    "PALETTES", "PETAL_SIZES", "PETAL_SIZE_LABELS",
-                   "palette", "size_scale", "DEFAULT_PALETTE", "DEFAULT_PETAL_SIZE"],
+                   "palette", "size_scale", "DEFAULT_PALETTE", "DEFAULT_PETAL_SIZE",
+                   # v11：第一片固定默认打开 / 程序名推导 / 空白花瓣 / 从左边顺时针
+                   "program_label", "_reg_friendly_name", "_version_strings",
+                   "_is_legacy_default", "DEFAULT_PETAL_NAME", "EXPLORER_LABEL",
+                   "EMPTY_HINT", "START_DEG"],
     "main": ["CATEGORIES", "CATEGORY_LABEL", "DEFAULT_EXTS", "match_by_mode",
              "detect_mode", "direct_open", "direct_open_auto",
              # v10：托盘设置菜单（_direct_open_async 已随『直接打开选中文件』删除）
              "build_tray_menu", "apply_palette", "apply_petal_size",
              "apply_show_hotkey", "_combo_free", "show_menu_combo",
-             "SHOW_HOTKEY_CHOICES"],
+             "SHOW_HOTKEY_CHOICES",
+             # v11：main 只通过 petal_menu 间接用到默认花瓣逻辑，标记留在那边
+             ],
 }
 
 

@@ -29,7 +29,7 @@ if getattr(sys, "frozen", False):
 else:
     EXE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-VERSION = "v10"
+VERSION = "v11"
 
 APP_DIR = os.path.join(os.environ.get("APPDATA", EXE_DIR), "PetalMenu")
 os.makedirs(APP_DIR, exist_ok=True)
@@ -129,8 +129,8 @@ _DEFAULT_CONFIG["programs"] = {key: "" for key, _label, _e in CATEGORIES}
 _DEFAULT_CONFIG["palette"] = DEFAULT_PALETTE
 _DEFAULT_CONFIG["petal_size"] = DEFAULT_PETAL_SIZE
 _DEFAULT_CONFIG["petal_count"] = 0
+# 第一片「默认打开」由 petal_menu.build_petals 自动插入，不写在配置里
 _DEFAULT_CONFIG["petals"] = [
-    {"name": "默认打开", "program": ""},
     {"name": "所在文件夹", "program": "__explorer__"},
 ]
 DEFAULT_YAML = yaml.safe_dump(_DEFAULT_CONFIG, allow_unicode=True, sort_keys=False)
