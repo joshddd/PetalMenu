@@ -121,7 +121,7 @@ programs:
   audio: ''
   archive: ''
   disc: ''
-petal_count: 4
+petal_count: 3
 palette: classic
 petal_size: normal
 petals:

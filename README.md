@@ -98,7 +98,7 @@ programs:                  # 各类别的「直开」程序，空 = 系统默认
 palette: classic        # 配色：classic 经典 / chinese 中式 / japanese 和式 / morandi 莫兰迪 / fresh 清新
 petal_size: normal      # 花瓣大小：small 78% / normal 100% / large 126% / xlarge 155%
 
-petal_count: 4          # 总片数（含固定的第一片）；0 = 全部；N = 前 N 个（不足补占位花瓣）
+petal_count: 3          # 总片数（含固定的第一片，默认 3）；0 = 全部；N = 前 N 个（不足补占位花瓣）
 
 # 花瓣顺序：第一片永远是「默认打开」（系统默认程序），第二片起按下面 petals 的顺序
 # 从左（9 点钟）开始顺时针排。显示名只由 program 决定：

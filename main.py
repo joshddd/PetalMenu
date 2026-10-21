@@ -128,7 +128,7 @@ _DEFAULT_CONFIG["programs"] = {key: "" for key, _label, _e in CATEGORIES}
 # 外观（托盘右键菜单里可改）：配色方案 + 花瓣大小
 _DEFAULT_CONFIG["palette"] = DEFAULT_PALETTE
 _DEFAULT_CONFIG["petal_size"] = DEFAULT_PETAL_SIZE
-_DEFAULT_CONFIG["petal_count"] = 0
+_DEFAULT_CONFIG["petal_count"] = 3
 # 第一片「默认打开」由 petal_menu.build_petals 自动插入，不写在配置里
 _DEFAULT_CONFIG["petals"] = [
     {"name": "所在文件夹", "program": "__explorer__"},
@@ -157,7 +157,7 @@ def load_config():
     new.setdefault("programs", {})
     for _key, _label, _e in CATEGORIES:
         new["programs"].setdefault(_key, "")
-    new.setdefault("petal_count", 0)
+    new.setdefault("petal_count", 3)
     new.setdefault("petals", [])
     # 外观键：老的配置文件里没有，顺便把写错的方案名纠正回默认值
     if str(new.get("palette") or "") not in PALETTES:
