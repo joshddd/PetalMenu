@@ -1,0 +1,23 @@
+hotkeys:
+  show_menu: alt+z
+  open_video: "ctrl+alt+v"
+  open_image: "ctrl+alt+p"
+
+video_exts: [".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".m4v", ".ts", ".webm"]
+image_exts: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff"]
+
+programs:
+  video: ''
+  image: ''
+
+# 0 = 全部匹配的打开方式；N = 显示 N 个花瓣（不够时补「未配置」占位花瓣，右键可绑定程序）
+petal_count: 3
+
+petals:
+  - name: "默认打开"
+    program: ""
+  - name: "PotPlayer"
+    program: 'C:\Program Files\DAUM\PotPlayer\PotPlayerMini64.exe'
+    exts: [".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".m4v", ".ts", ".webm"]
+  - name: "所在文件夹"
+    program: "__explorer__"

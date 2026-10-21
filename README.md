@@ -1,0 +1,97 @@
+# PetalMenu 花瓣菜单
+
+Windows 上的 PyQt6 放射状「花瓣」菜单：在资源管理器里选中若干文件，按热键弹出花瓣，
+每个花瓣绑定一个打开方式，点一下就启动（例如 PotPlayer 播放视频、默认程序打开图片、打开所在文件夹）。
+
+## 功能
+
+- 全局热键唤起花瓣菜单（当前默认 `alt+z`），在鼠标位置绘制，Esc / 点外部自动关闭
+- 花瓣按扩展名过滤：视频选中时只显示视频类打开方式，图片同理
+- 自绘放射状菜单，带展开动画和配色（`COLORS`）
+- 右键中心花瓣 → 设置花瓣数量（`0` = 显示全部匹配项；`N` = 取前 N 个）
+- 已配置的打开方式不足 N 个时自动补「未配置」占位花瓣（灰底虚线），右键占位花瓣即可现场绑定程序并写回配置
+- 托盘常驻，支持热键运行中热更新
+- 配置持久化在 `%APPDATA%\PetalMenu\config.yaml`，首次启动自动生成，可从 exe 同级目录迁移旧配置
+
+## 选择来源
+
+| 来源 | 判定方式 |
+| --- | --- |
+| Windows 资源管理器 | 前台窗口类名 `CabinetWClass`，读当前目录 + 选中项 |
+| Everything | 前台窗口类名 `EVERYTHING`，读结果列表选中项 + 当前目录 |
+
+## 文件结构
+
+```
+main.py          入口：热键、托盘、配置读写、来源检测、启动目标程序
+hotkey_hook.py   Win32 低级键盘钩子（WH_KEYBOARD_LL）实现的全局热键
+petal_menu.py    自绘花瓣菜单、编辑花瓣对话框、设置数量对话框
+PetalMenu.spec   PyInstaller 打包配置
+config.yaml       默认配置模板
+tests/           验证脚本（配置、UI、热键吞键、Everything 支持、打包检查等）
+```
+
+## 运行 / 打包
+
+```bat
+pip install PyQt6 PyYAML
+python main.py
+
+pyinstaller PetalMenu.spec --noconfirm --clean --distpath dist_vN --workpath build_vN
+```
+
+## 配置示例
+
+```yaml
+hotkeys:
+  show_menu: alt+z
+  open_video: "ctrl+alt+v"
+  open_image: "ctrl+alt+p"
+
+programs:
+  video: ''
+  image: ''
+
+petal_count: 3          # 0 = 全部；N = 前 N 个（不足补占位花瓣）
+
+petals:
+  - name: "默认打开"
+    program: ""         # 空 = 交给系统默认程序
+  - name: "PotPlayer"
+    program: 'C:\Program Files\DAUM\PotPlayer\PotPlayerMini64.exe'
+    exts: [".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".m4v", ".ts", ".webm"]
+  - name: "所在文件夹"
+    program: "__explorer__"   # 特殊值：打开目标所在目录
+```
+
+## 为什么不用 `keyboard` 库
+
+`keyboard==0.13.5` 的 `_winkeyboard.py` 里有一段「忽略重复 Alt」的启发式：
+
+```python
+fake_alt = (LLKHF_INJECTED | 0x20)          # 0x30
+if vk != VK_PACKET and flags & fake_alt != fake_alt:
+    process_key(...)
+```
+
+事件的 `flags` 同时带 `injected(0x10)` 和 `context(0x20)` 时会被整条丢弃。
+而 ToDesk / RDP / 虚拟键盘 / SendInput 注入按键时恰好会带上这两位，于是所有含 `Alt`
+的组合键在远程会话里完全失效（普通字母 `flags=0x10` 反而正常，很容易误判成「虚拟键盘没发键」）。
+
+本项目直接读原始钩子事件，只忽略 `VK_PACKET`（Unicode 文本注入）和 0.3s 内的自动重复，
+修饰键状态用 `GetAsyncKeyState` 取，因此物理键盘、远程键盘、软键盘、AHK 发送都能触发。
+
+命中热键后会把主键吞掉（钩子返回非 0），否则前台窗口会对「没有菜单助记符的 Alt+字母」
+放一声系统提示音，且字母会被敲进目标程序。修饰键的 keyup 必须放行，避免前台窗口卡在菜单模式。
+`PETALMENU_SWALLOW=0` 可关掉吞键做对照。
+
+## 调试
+
+- `PETALMENU_HOOK_DEBUG=1` → 每个键盘事件与命中写 `%APPDATA%\PetalMenu\hook.log`
+- `%APPDATA%\PetalMenu\debug.log` → 每次配置 load/save 与花瓣编辑结果
+
+## 已知限制
+
+- 仅 Windows（依赖 Win32 钩子、`CabinetWClass` / Everything 窗口探测）
+- `alt+x`、`win+b` 等组合在部分机器上已被占用或与系统行为冲突，换热键前先确认空闲
+- Everything 模式下若索引过期，拼出的完整路径会指向旧文件名，需要重建 Everything 索引
