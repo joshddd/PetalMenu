@@ -1,97 +1,87 @@
 # -*- coding: utf-8 -*-
-"""非侵入检查：解包 exe 内嵌的 petal_menu 字节码，确认修复代码已打包
-对比新旧 exe（dist\\PetalMenu.exe vs dist\\PetalMenu.exe.bak-*）
+"""非侵入检查：解包 exe 内嵌的字节码，确认 v9 的新功能真的进了包
+
+用法：python _checkexe.py <目录>        # 目录里放 PetalMenu.exe（默认 dist_v9）
 """
-import sys, os, glob, marshal, dis
+import glob
+import os
+import sys
 
-HERE = sys.argv[1] if len(sys.argv) > 1 else r"C:\tmp\hotkey\dist"
-
+HERE = sys.argv[1] if len(sys.argv) > 1 else r"C:\tmp\hotkey\dist_v9"
 log = lambda *a: print(*a, flush=True)
 
-def get_code_objects(exe_path, module="petal_menu"):
+WANT = {
+    "petal_menu": ["_open_folder", "_in_center", "_draw_folder_glyph",
+                   "_draw_center_text", "_launch"],
+    "main": ["CATEGORIES", "CATEGORY_LABEL", "DEFAULT_EXTS", "match_by_mode",
+             "detect_mode", "direct_open", "direct_open_auto", "_direct_open_async"],
+}
+
+
+def code_of(exe_path, module):
     from PyInstaller.archive.readers import CArchiveReader, ZlibArchiveReader
     arc = CArchiveReader(exe_path)
-    pyz_name = next((n for n in arc.toc if n.endswith(".pyz")), None)
-    if not pyz_name:
+    pyz = next((n for n in arc.toc if n.endswith(".pyz")), None)
+    if not pyz:
         return None, "找不到 PYZ"
-    data = arc.extract(pyz_name)
-    tmp = os.path.join(os.environ.get("TEMP", "."), "_chk_" + os.path.basename(exe_path) + ".pyz")
+    tmp = os.path.join(os.environ.get("TEMP", "."),
+                       "_chk_%s_%s.pyz" % (os.path.basename(exe_path), module))
     with open(tmp, "wb") as f:
-        f.write(data)
+        f.write(arc.extract(pyz))
     z = ZlibArchiveReader(tmp)
-    entry = z.toc.get(module)
-    if not entry:
-        return None, f"PYZ 里没有 {module}"
-    code = z.extract(module)
-    return code, None
+    if module not in z.toc:
+        return None, "PYZ 里没有 %s" % module
+    return z.extract(module), None
 
-def names_of(code):
-    out = set()
+
+def markers(code):
+    """所有层级的名字：属性名/全局名/函数名/字符串常量里出现的标识符"""
+    got = set()
+
     def walk(c):
-        for n in getattr(c, "co_names", ()): out.add(n)
+        for n in getattr(c, "co_names", ()):
+            got.add(n)
         for k in getattr(c, "co_consts", ()):
-            if hasattr(k, "co_code"): walk(k)
+            if hasattr(k, "co_code"):
+                got.add(k.co_name)
+                walk(k)
+            elif isinstance(k, str):
+                got.add(k)
+
     walk(code)
-    return out
+    return got
 
-def top_funcs(code):
-    out = []
-    for k in code.co_consts:
-        if hasattr(k, "co_name") and k.co_name != "<module>":
-            out.append(k.co_name)
-    return out
-
-MARKERS = ["visible_petals", "_show_dialog", "_force_foreground",
-           "_OPEN_DIALOGS", "EditPetalDialog", "SetCountDialog", "match_count"]
-
-def inspect(path, module="petal_menu"):
-    log(f"\n--- {os.path.basename(path)} ({os.path.getsize(path)//1024} KB) ---")
-    code, err = get_code_objects(path, module)
-    if err:
-        log(f"  错误: {err}")
-        return None
-    n = names_of(code)
-    fns = top_funcs(code)
-    log(f"  顶层定义: {', '.join(fns)}")
-    hit = [m for m in MARKERS if m in n or m in fns]
-    log(f"  标记命中: {hit}")
-    return set(hit)
-
-log_path = os.path.join(HERE, "PetalMenu.exe")
-log("=== 检查打包产物 ===")
-new = inspect(log_path)
-old = None
-baks = sorted(glob.glob(os.path.join(HERE, "PetalMenu.exe.bak-*")))
-if baks:
-    old = inspect(baks[-1])
 
 FAIL = []
-if new is None:
-    FAIL.append("新 exe 解析失败")
-else:
-    for m in ["visible_petals", "_show_dialog", "_force_foreground", "_OPEN_DIALOGS"]:
-        ok = m in new
-        print(f"  {'PASS' if ok else 'FAIL'} - 新 exe 含 {m}", flush=True)
-        if not ok: FAIL.append(m)
-    if old is not None:
-        ok = "visible_petals" not in old
-        print(f"  {'PASS' if ok else 'FAIL'} - 旧 exe 不含 visible_petals（对照组）", flush=True)
+exe = os.path.join(HERE, "PetalMenu.exe")
+if not os.path.exists(exe):
+    print("找不到 %s" % exe)
+    sys.exit(1)
+print("=== 检查 %s（%d KB）===" % (exe, os.path.getsize(exe) // 1024), flush=True)
 
-# main 模块里的 Everything 支持
-mcode, merr = get_code_objects(log_path, "main")
-if merr:
-    FAIL.append("main 模块解析失败: " + merr)
-    print(f"  FAIL - main 模块解析失败: {merr}", flush=True)
-else:
-    mn = names_of(mcode)
-    mfn = top_funcs(mcode)
-    print(f"  main 顶层定义: {', '.join(mfn)}", flush=True)
-    for m in ["everything_selected_files", "detect_source", "_path_from_cells",
-              "_RemoteLVText", "_find_child_class"]:
-        ok = m in mn or m in mfn
-        print(f"  {'PASS' if ok else 'FAIL'} - 新 exe 含 {m}", flush=True)
-        if not ok: FAIL.append(m)
+for module, wants in WANT.items():
+    code, err = code_of(exe, module)
+    if err:
+        FAIL.append("%s: %s" % (module, err))
+        print("  FAIL - %s 解包失败: %s" % (module, err), flush=True)
+        continue
+    got = markers(code)
+    for w in wants:
+        ok = w in got
+        print("  %s - %s.%s" % ("PASS" if ok else "FAIL", module, w), flush=True)
+        if not ok:
+            FAIL.append("%s.%s" % (module, w))
+
+# 对照组：旧 exe 不该有 _open_folder，能反证检查方法有效
+baks = sorted(glob.glob(os.path.join(HERE, "PetalMenu.exe.bak-*")))
+if baks:
+    old = baks[-1]
+    code, err = code_of(old, "petal_menu")
+    if not err:
+        ok = "_open_folder" not in markers(code)
+        print("  %s - 对照 %s 不含 _open_folder"
+              % ("PASS" if ok else "WARN", os.path.basename(old)), flush=True)
 
 print("\n==== 汇总 ====")
-print("打包产物已是修复版" if not FAIL else f"失败: {FAIL}", flush=True)
+print("打包产物含 v9 全部新功能" if not FAIL else "失败: %s" % FAIL, flush=True)
 sys.exit(1 if FAIL else 0)

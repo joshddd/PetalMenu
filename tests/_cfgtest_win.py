@@ -42,6 +42,20 @@ check(len(saved.get("petals") or []) == _exp_petals, "petals 没被写坏")
 check(saved["hotkeys"]["show_menu"] == M.CONFIG["hotkeys"]["show_menu"],
       f"热键保留: {saved['hotkeys']}")
 
+# 文件类别表
+for _k, _label, _ext_key in M.CATEGORIES:
+    check(bool(M.CONFIG.get(_ext_key)), f"{_label}扩展名表非空（{len(M.CONFIG.get(_ext_key) or [])} 项）")
+    check(_k in M.CONFIG["programs"], f"programs 含 {_k}")
+
+_cases = [("video", r"C:\a\b.mp4"), ("image", r"C:\a\b.png"),
+          ("document", r"C:\a\b.pdf"), ("audio", r"C:\a\b.flac"),
+          ("archive", r"C:\a\b.7z"), ("disc", r"C:\a\b.iso")]
+for _mode, _path in _cases:
+    check(M.match_by_mode(_mode, [_path]) == [_path], f"{_path} 归为 {_mode}")
+    check(M.detect_mode([_path]) == _mode, f"detect_mode({_path}) = {_mode}")
+check(M.detect_mode([r"C:\a\b.xyz"]) is None, "未知扩展名 detect_mode 返回 None")
+check(M.match_by_mode("document", [r"C:\a\b.mp4"]) == [], "跨类别不误判")
+
 # 重新加载
 M.CONFIG = {}
 M.load_config()
@@ -56,7 +70,7 @@ check(M._sync_legacy_config() is False, "旧配置更旧时不覆盖 APPDATA")
 try:
     M._register_hotkeys()
     parsed = M._HOTKEYS.set_hotkeys and M._HOTKEYS._hotkeys
-    check(len(parsed) == 3, f"热键解析成功 {[c for _m, _v, c, _cb in parsed]}")
+    check(len(parsed) == 4, f"热键解析成功 {[c for _m, _v, c, _cb in parsed]}")
     from hotkey_hook import parse_combo
     check(parse_combo("alt+x") == (1, 0x58), f"alt+x 解析 = {parse_combo('alt+x')}")
     check(parse_combo("ctrl+alt+v") == (3, 0x56), f"ctrl+alt+v 解析 = {parse_combo('ctrl+alt+v')}")

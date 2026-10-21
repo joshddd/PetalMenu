@@ -26,7 +26,7 @@ if getattr(sys, "frozen", False):
 else:
     EXE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-VERSION = "v5"
+VERSION = "v9"
 
 APP_DIR = os.path.join(os.environ.get("APPDATA", EXE_DIR), "PetalMenu")
 os.makedirs(APP_DIR, exist_ok=True)
@@ -75,26 +75,59 @@ def _sync_legacy_config():
         pass
     return False
 
-DEFAULT_YAML = """hotkeys:
-  show_menu: "alt+z"
-  open_video: "ctrl+alt+v"
-  open_image: "ctrl+alt+p"
+# ---------------------------------------------------------------- 文件类别
+# (配置键, 中文名, 扩展名表所在的配置键)
+CATEGORIES = (
+    ("video",    "视频",     "video_exts"),
+    ("image",    "图片",     "image_exts"),
+    ("document", "文档",     "document_exts"),
+    ("audio",    "音频",     "audio_exts"),
+    ("archive",  "压缩包",   "archive_exts"),
+    ("disc",     "光盘镜像", "disc_exts"),
+)
+CATEGORY_LABEL = {key: label for key, label, _e in CATEGORIES}
 
-video_exts: [".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".m4v", ".ts", ".webm"]
-image_exts: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff"]
+DEFAULT_EXTS = {
+    "video": [".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".m4v", ".ts",
+              ".webm", ".rmvb", ".mpg", ".mpeg", ".m2ts", ".vob", ".ogv"],
+    "image": [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff",
+              ".heic", ".avif", ".jxl", ".ico", ".svg", ".raw", ".cr2", ".nef", ".arw"],
+    "document": [".pdf", ".doc", ".docx", ".rtf", ".odt", ".txt", ".md", ".log",
+                 ".xls", ".xlsx", ".ods", ".csv", ".et", ".ppt", ".pptx", ".odp",
+                 ".dps", ".wps", ".epub", ".mobi", ".azw3", ".djvu", ".chm",
+                 ".xps", ".pages", ".tex", ".html", ".htm"],
+    "audio": [".mp3", ".flac", ".wav", ".aac", ".m4a", ".ogg", ".oga", ".opus",
+              ".wma", ".ape", ".alac", ".aiff", ".aif", ".mid", ".midi", ".amr",
+              ".ac3", ".dts", ".dsf", ".dff", ".mka", ".wv", ".tta"],
+    "archive": [".zip", ".rar", ".7z", ".tar", ".gz", ".tgz", ".bz2", ".tbz2",
+                ".xz", ".txz", ".zst", ".cab", ".arj", ".lzh", ".lha",
+                ".001", ".r00"],
+    "disc": [".iso", ".img", ".bin", ".cue", ".nrg", ".mdf", ".mds", ".ccd",
+             ".sub", ".udf", ".toast", ".cso", ".dmg", ".wim", ".vhd", ".vhdx"],
+}
 
-programs:
-  video: ''
-  image: ''
+DEFAULT_HOTKEYS = {
+    "show_menu": "alt+z",
+    "open_video": "ctrl+alt+v",
+    "open_image": "ctrl+alt+p",
+    "open_document": "",
+    "open_audio": "",
+    "open_archive": "",
+    "open_disc": "",
+    "open_auto": "ctrl+alt+o",
+}
 
-petal_count: 0
-
-petals:
-  - name: "默认打开"
-    program: ""
-  - name: "所在文件夹"
-    program: "__explorer__"
-"""
+# 首次运行写出的配置：由上面几张表生成，保证「默认值」只有一份，不会两边漂移
+_DEFAULT_CONFIG: dict = {"hotkeys": dict(DEFAULT_HOTKEYS)}
+_DEFAULT_CONFIG.update({ext_key: list(DEFAULT_EXTS[key])
+                        for key, _label, ext_key in CATEGORIES})
+_DEFAULT_CONFIG["programs"] = {key: "" for key, _label, _e in CATEGORIES}
+_DEFAULT_CONFIG["petal_count"] = 0
+_DEFAULT_CONFIG["petals"] = [
+    {"name": "默认打开", "program": ""},
+    {"name": "所在文件夹", "program": "__explorer__"},
+]
+DEFAULT_YAML = yaml.safe_dump(_DEFAULT_CONFIG, allow_unicode=True, sort_keys=False)
 
 
 def load_config():
@@ -109,14 +142,15 @@ def load_config():
     with open(CONFIG_PATH, encoding="utf-8") as f:
         new = yaml.safe_load(f) or {}
     new.setdefault("hotkeys", {})
-    new["hotkeys"].setdefault("show_menu", "alt+z")
-    new["hotkeys"].setdefault("open_video", "ctrl+alt+v")
-    new["hotkeys"].setdefault("open_image", "ctrl+alt+p")
-    new.setdefault("video_exts", [])
-    new.setdefault("image_exts", [])
+    for _hk, _dev in DEFAULT_HOTKEYS.items():
+        new["hotkeys"].setdefault(_hk, _dev)
+    for _key, _label, _ext_key in CATEGORIES:
+        _cur = new.get(_ext_key)
+        if not isinstance(_cur, list) or not _cur:
+            new[_ext_key] = list(DEFAULT_EXTS[_key])
     new.setdefault("programs", {})
-    new["programs"].setdefault("video", "")
-    new["programs"].setdefault("image", "")
+    for _key, _label, _e in CATEGORIES:
+        new["programs"].setdefault(_key, "")
     new.setdefault("petal_count", 0)
     new.setdefault("petals", [])
     # 就地更新：保持 CONFIG 这个 dict 的身份不变，避免菜单/对话框里
@@ -400,31 +434,65 @@ def open_with(program, files, label=""):
 EVERYTHING_HELP = "Everything 里没有选中文件：先点一行结果，再按热键"
 
 
-def files_or_notify():
-    kind, hwnd = detect_source()
+def files_or_notify(hwnd=None, fallback=None):
+    """取当前选中文件；fallback 用于托盘菜单（点托盘时前台已经不是资源管理器了）"""
+    kind, h = detect_source(hwnd)
     if kind == "explorer":
-        return get_selected_files(hwnd)
+        return get_selected_files(h)
     if kind == "everything":
-        files = everything_selected_files(hwnd)
+        files = everything_selected_files(h)
         if not files:
             notify("PetalMenu", EVERYTHING_HELP)
         return files
+    if fallback:
+        _dbg("files_or_notify: 前台不是资源管理器，回退到上次选中的 %d 个文件" % len(fallback))
+        return list(fallback)
     notify("PetalMenu", "当前前台窗口既不是资源管理器，也不是 Everything")
     return None
 
 # ---------------------------------------------------------------- 热键动作
 
-def direct_open(mode):
-    files = files_or_notify()
+def match_by_mode(mode, files):
+    """按类别里配置的扩展名过滤"""
+    exts = {str(e).lower() for e in (CONFIG.get(mode + "_exts") or [])}
+    return [f for f in files if os.path.splitext(f)[1].lower() in exts]
+
+
+def detect_mode(files):
+    """判断这批文件属于哪个类别（按 CATEGORIES 顺序取第一个命中的），认不出返回 None"""
+    for key, _label, _ext_key in CATEGORIES:
+        if match_by_mode(key, files):
+            return key
+    return None
+
+
+def direct_open(mode, files=None, fallback=None):
+    """用 programs.<mode> 打开选中文件里属于该类别的那些"""
+    if files is None:
+        files = files_or_notify(fallback=fallback)
     if not files:
         return
-    exts = [e.lower() for e in CONFIG.get(mode + "_exts", [])]
-    matched = [f for f in files if os.path.splitext(f)[1].lower() in exts]
+    matched = match_by_mode(mode, files)
     if not matched:
-        kind = "视频" if mode == "video" else "图片"
-        notify("PetalMenu", f"选中的文件里没有{kind}格式")
+        notify("PetalMenu", "选中的文件里没有%s格式" % CATEGORY_LABEL.get(mode, mode))
         return
-    open_with(CONFIG.get("programs", {}).get(mode, ""), matched, label=mode)
+    _dbg("direct_open: mode=%s files=%s" % (mode, matched))
+    open_with(CONFIG.get("programs", {}).get(mode, ""), matched,
+              label=CATEGORY_LABEL.get(mode, mode) or mode)
+
+
+def direct_open_auto(files=None, fallback=None):
+    """自动识别类别后直开；认不出的类型交给系统默认打开"""
+    if files is None:
+        files = files_or_notify(fallback=fallback)
+    if not files:
+        return
+    mode = detect_mode(files)
+    if mode is None:
+        _dbg("direct_open_auto: 未识别类型，交给系统默认 -> %s" % files)
+        open_with("", files, label="自动")
+        return
+    direct_open(mode, files=files)
 
 
 def on_show_menu():
@@ -434,12 +502,16 @@ def on_show_menu():
 
 
 def _register_hotkeys():
+    """按配置注册热键；空字符串表示不注册这一类"""
     hk = CONFIG["hotkeys"]
-    _HOTKEYS.set_hotkeys([
-        (hk["open_video"], lambda: direct_open("video")),
-        (hk["open_image"], lambda: direct_open("image")),
-        (hk["show_menu"], on_show_menu),
-    ])
+    items: list = [(hk.get("open_" + key), (lambda k=key: direct_open(k)))
+                   for key, _label, _ext_key in CATEGORIES]
+    items.append((hk.get("open_auto"), direct_open_auto))
+    items.append((hk.get("show_menu"), on_show_menu))
+    spec = [(combo, cb) for combo, cb in items if str(combo or "").strip()]
+    _HOTKEYS.set_hotkeys(spec)
+    _dbg("register_hotkeys: %s" % [combo for combo, _cb in spec])
+    return spec
 
 
 def listener_thread():
@@ -480,6 +552,25 @@ def setup_tray(app):
     _TRAY = tray
 
     menu = QMenu()
+
+    def _direct_open_async(mode):
+        # 取选中文件要跑 PowerShell（最长 10s），别卡住托盘和 GUI 线程。
+        # 点托盘时前台窗口已经不是资源管理器了，用上次选中过的文件兜底。
+        job = (lambda: direct_open_auto(fallback=LAST_FILES)) if mode is None \
+            else (lambda: direct_open(mode, fallback=LAST_FILES))
+        threading.Thread(target=job, daemon=True).start()
+
+    sub = menu.addMenu("直接打开选中文件")
+    for _key, _label, _ext_key in CATEGORIES:
+        _combo = str(CONFIG["hotkeys"].get("open_" + _key) or "").strip()
+        _act = sub.addAction(_label + (("  [%s]" % _combo) if _combo else ""))
+        _act.triggered.connect(lambda _checked=False, k=_key: _direct_open_async(k))
+    sub.addSeparator()
+    _combo_auto = str(CONFIG["hotkeys"].get("open_auto") or "").strip()
+    _act_auto = sub.addAction("自动识别类型" + (("  [%s]" % _combo_auto) if _combo_auto else ""))
+    _act_auto.triggered.connect(lambda _checked=False: _direct_open_async(None))
+
+    menu.addSeparator()
     act_reload = menu.addAction("重新加载配置")
     act_open_cfg = menu.addAction("打开配置目录")
     menu.addSeparator()
@@ -555,11 +646,13 @@ def main():
     timer.timeout.connect(poll_actions)
     timer.start(15)
 
-    hk = CONFIG["hotkeys"]
     print("PetalMenu 运行中：")
-    print(f"  {hk['open_video']}  -> 直开视频")
-    print(f"  {hk['open_image']}  -> 直开图片")
-    print(f"  {hk['show_menu']}  -> 花瓣菜单")
+    for _key, _label, _ext_key in CATEGORIES:
+        _combo = str(CONFIG["hotkeys"].get("open_" + _key) or "").strip()
+        print(f"  {_combo or '(未设置)':<14} -> 直开{_label}")
+    _auto = str(CONFIG["hotkeys"].get("open_auto") or "").strip()
+    print(f"  {_auto or '(未设置)':<14} -> 直开（自动识别类型）")
+    print(f"  {str(CONFIG['hotkeys'].get('show_menu') or ''):<14} -> 花瓣菜单")
     print(f"  配置目录: {APP_DIR}")
     app.exec()
 

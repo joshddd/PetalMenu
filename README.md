@@ -7,6 +7,11 @@ Windows 上的 PyQt6 放射状「花瓣」菜单：在资源管理器里选中�
 
 - 全局热键唤起花瓣菜单（当前默认 `alt+z`），在鼠标位置绘制，Esc / 点外部自动关闭
 - 花瓣按扩展名过滤：视频选中时只显示视频类打开方式，图片同理
+- 六类文件开箱可用：视频、图片、文档、音频、压缩包、光盘镜像。扩展名表就是配置文件里的
+  `video_exts` / `document_exts` 等，想加类型直接往里塞扩展名
+- 每类可以配一个「直开」热键（`programs.<类别>` 指定的程序）；`open_auto` 会自动判断类型再选程序，
+  认不出的类型交给系统默认打开
+- 左键点花瓣中心 → 在资源管理器里打开文件所在目录（同时选中该文件）
 - 自绘放射状菜单，带展开动画和配色（`COLORS`）
 - 右键中心花瓣 → 设置花瓣数量（`0` = 显示全部匹配项；`N` = 取前 N 个）
 - 已配置的打开方式不足 N 个时自动补「未配置」占位花瓣（灰底虚线），右键占位花瓣即可现场绑定程序并写回配置
@@ -47,10 +52,27 @@ hotkeys:
   show_menu: alt+z
   open_video: "ctrl+alt+v"
   open_image: "ctrl+alt+p"
+  open_document: ""        # 留空 = 这一类不注册热键（托盘菜单里仍可点）
+  open_audio: ""
+  open_archive: ""
+  open_disc: ""
+  open_auto: "ctrl+alt+o"  # 自动识别类型后直开
 
-programs:
+# 六类文件的扩展名表；不写或写空会自动补默认值
+video_exts: [".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".m4v", ".ts", ".webm"]
+image_exts: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff"]
+document_exts: [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".epub", ".txt", ".md"]
+audio_exts: [".mp3", ".flac", ".wav", ".aac", ".m4a", ".ogg", ".opus", ".wma", ".ape"]
+archive_exts: [".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".zst", ".cab"]
+disc_exts: [".iso", ".img", ".bin", ".cue", ".nrg", ".mdf", ".mds", ".vhd", ".vhdx"]
+
+programs:                  # 各类别的「直开」程序，空 = 系统默认
   video: ''
   image: ''
+  document: ''
+  audio: ''
+  archive: ''              # 例如 'C:\Program Files\7-Zip\7zFM.exe'
+  disc: ''
 
 petal_count: 3          # 0 = 全部；N = 前 N 个（不足补占位花瓣）
 
@@ -93,5 +115,7 @@ if vk != VK_PACKET and flags & fake_alt != fake_alt:
 ## 已知限制
 
 - 仅 Windows（依赖 Win32 钩子、`CabinetWClass` / Everything 窗口探测）
-- `alt+x`、`win+b` 等组合在部分机器上已被占用或与系统行为冲突，换热键前先确认空闲
+- `alt+x`、`ctrl+alt+p`、`win+b` 等组合在部分机器上已被占用或与系统行为冲突，换热键前先确认空闲
+  （`tests/_hkfree.py` 会逐个试 `RegisterHotKey`，直接报出哪个被占用）
+- 配置里留空的直开热键不会被注册；没热键的类别仍可从托盘菜单「直接打开选中文件」触发
 - Everything 模式下若索引过期，拼出的完整路径会指向旧文件名，需要重建 Everything 索引

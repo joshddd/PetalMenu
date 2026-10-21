@@ -1,23 +1,141 @@
 hotkeys:
   show_menu: alt+z
-  open_video: "ctrl+alt+v"
-  open_image: "ctrl+alt+p"
-
-video_exts: [".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".m4v", ".ts", ".webm"]
-image_exts: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff"]
-
+  open_video: ctrl+alt+v
+  open_image: ctrl+alt+p
+  open_document: ''
+  open_audio: ''
+  open_archive: ''
+  open_disc: ''
+  open_auto: ctrl+alt+o
+video_exts:
+- .mp4
+- .mkv
+- .avi
+- .mov
+- .flv
+- .wmv
+- .m4v
+- .ts
+- .webm
+image_exts:
+- .jpg
+- .jpeg
+- .png
+- .gif
+- .bmp
+- .webp
+- .tif
+- .tiff
+document_exts:
+- .pdf
+- .doc
+- .docx
+- .rtf
+- .odt
+- .txt
+- .md
+- .log
+- .xls
+- .xlsx
+- .ods
+- .csv
+- .et
+- .ppt
+- .pptx
+- .odp
+- .dps
+- .wps
+- .epub
+- .mobi
+- .azw3
+- .djvu
+- .chm
+- .xps
+- .pages
+- .tex
+- .html
+- .htm
+audio_exts:
+- .mp3
+- .flac
+- .wav
+- .aac
+- .m4a
+- .ogg
+- .oga
+- .opus
+- .wma
+- .ape
+- .alac
+- .aiff
+- .aif
+- .mid
+- .midi
+- .amr
+- .ac3
+- .dts
+- .dsf
+- .dff
+- .mka
+- .wv
+- .tta
+archive_exts:
+- .zip
+- .rar
+- .7z
+- .tar
+- .gz
+- .tgz
+- .bz2
+- .tbz2
+- .xz
+- .txz
+- .zst
+- .cab
+- .arj
+- .lzh
+- .lha
+- '.001'
+- .r00
+disc_exts:
+- .iso
+- .img
+- .bin
+- .cue
+- .nrg
+- .mdf
+- .mds
+- .ccd
+- .sub
+- .udf
+- .toast
+- .cso
+- .dmg
+- .wim
+- .vhd
+- .vhdx
 programs:
   video: ''
   image: ''
-
-# 0 = 全部匹配的打开方式；N = 显示 N 个花瓣（不够时补「未配置」占位花瓣，右键可绑定程序）
+  document: ''
+  audio: ''
+  archive: ''
+  disc: ''
 petal_count: 3
-
 petals:
-  - name: "默认打开"
-    program: ""
-  - name: "PotPlayer"
-    program: 'C:\Program Files\DAUM\PotPlayer\PotPlayerMini64.exe'
-    exts: [".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".m4v", ".ts", ".webm"]
-  - name: "所在文件夹"
-    program: "__explorer__"
+- name: 默认打开
+  program: C:/Program Files/VideoLAN/VLC/vlc.exe
+- name: PotPlayer
+  program: C:\Program Files\DAUM\PotPlayer\PotPlayerMini64.exe
+  exts:
+  - .mp4
+  - .mkv
+  - .avi
+  - .mov
+  - .flv
+  - .wmv
+  - .m4v
+  - .ts
+  - .webm
+- name: 所在文件夹
+  program: M:/software/mpv-v0.41.0-dev-gfffe7a23a-39086651352-x86_64-w64-mingw32-full/mpv.exe

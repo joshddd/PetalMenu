@@ -285,6 +285,7 @@ class PetalMenu(QWidget):
         self.files = list(files)
         self._scale = 0.0
         self.hover = -1
+        self._center_hover = False             # 光标是不是停在中心（决定中心画提示还是图标）
         self._all_petals_cfg = petals          # 原始配置（用于回写）
         self._petal_count = petal_count or 0
 
@@ -350,6 +351,30 @@ class PetalMenu(QWidget):
         r = math.hypot(dx, dy) / scale
         return r <= R_INNER
 
+    def _open_folder(self):
+        """左键点中心：在资源管理器里打开文件所在目录（多选时取第一个）"""
+        files = self.files or []
+        if not files:
+            _notify("PetalMenu", "没有可定位的文件")
+            return False
+        target = files[0]
+        folder = os.path.dirname(target)
+        try:
+            if os.path.exists(target):
+                # /select 会把目录打开并同时选中该文件。
+                # explorer 自己解析命令行，路径带空格时整条必须是一个字符串并加引号，
+                # 拆成 ["explorer", "/select,", path] 在带空格的路径上会被截断。
+                subprocess.Popen('explorer /select,"%s"' % target.replace('"', ""))
+            elif folder and os.path.isdir(folder):
+                subprocess.Popen('explorer "%s"' % folder.replace('"', ""))
+            else:
+                _notify("PetalMenu", f"目录不存在：{folder or target}")
+                return False
+        except Exception as e:
+            _notify("PetalMenu", f"打开目录失败：{e}")
+            return False
+        return True
+
     def _launch(self, petal):
         if petal.get("_placeholder"):
             _notify("PetalMenu",
@@ -359,7 +384,7 @@ class PetalMenu(QWidget):
         files = petal.get("_files") or self.files
         try:
             if program == "__explorer__":
-                subprocess.Popen(["explorer", "/select,", files[0]])
+                subprocess.Popen('explorer /select,"%s"' % files[0].replace('"', ""))
             elif program:
                 if os.path.exists(program):
                     subprocess.Popen([program] + files)
@@ -521,10 +546,15 @@ class PetalMenu(QWidget):
 
     # ---------------- 事件 ----------------
     def mouseMoveEvent(self, event):
-        idx = self._petal_at(event.position())
-        if idx != self.hover:
+        pos = event.position()
+        idx = self._petal_at(pos)
+        in_center = idx < 0 and self._in_center(pos)
+        if idx != self.hover or in_center != self._center_hover:
             self.hover = idx
+            self._center_hover = in_center
             self.update()
+            self.setCursor(Qt.CursorShape.PointingHandCursor
+                           if (idx >= 0 or in_center) else Qt.CursorShape.ArrowCursor)
 
     def mousePressEvent(self, event):
         if self._scale < 0.9:
@@ -547,6 +577,11 @@ class PetalMenu(QWidget):
             return
         # 左键
         if event.button() == Qt.MouseButton.LeftButton:
+            # 左键中心 -> 在资源管理器里打开文件所在目录
+            if self._in_center(pos):
+                self._open_folder()
+                self.close()
+                return
             idx = self._petal_at(pos)
             if 0 <= idx < len(self.petals):
                 self._launch(self.petals[idx])
@@ -606,11 +641,15 @@ class PetalMenu(QWidget):
         cr = R_INNER - 4
         painter.drawEllipse(QRectF(-cr, -cr, 2 * cr, 2 * cr))
 
-        # 中心提示：hover 花瓣名 / 右键提示
+        # 中心提示：hover 花瓣名 / 中心可点（打开所在目录）
         if 0 <= self.hover < len(self.petals):
-            name = self.petals[self.hover]["name"]
+            self._draw_center_text(painter, self.petals[self.hover]["name"], cr)
+        elif self._center_hover:
+            self._draw_folder_glyph(painter, cr)
         else:
-            name = "打开方式"
+            self._draw_center_text(painter, "打开方式", cr)
+
+    def _draw_center_text(self, painter, name, cr):
         font = QFont("Microsoft YaHei UI", 10)
         painter.setFont(font)
         fm = QFontMetrics(font)
@@ -618,3 +657,17 @@ class PetalMenu(QWidget):
         painter.setPen(QColor("white"))
         painter.drawText(QRectF(-cr, -cr, 2 * cr, 2 * cr),
                          int(Qt.AlignmentFlag.AlignCenter), text)
+
+    def _draw_folder_glyph(self, painter, cr):
+        """光标进中心时画个文件夹图标：左键 = 在资源管理器里打开所在目录"""
+        pen = QPen(QColor(255, 205, 110))
+        pen.setWidth(2)
+        painter.setPen(pen)
+        painter.setBrush(QColor(255, 205, 110, 70))
+        w = cr * 1.25
+        h = cr * 0.92
+        tab_w = w * 0.44
+        tab_h = h * 0.26
+        painter.drawRoundedRect(
+            QRectF(-w / 2, -h / 2 - tab_h * 0.55, tab_w, tab_h), 3, 3)
+        painter.drawRoundedRect(QRectF(-w / 2, -h / 2, w, h), 4, 4)
