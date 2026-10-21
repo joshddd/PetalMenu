@@ -134,6 +134,30 @@ check("大小勾选小（78%）", size_checked and "78%" in size_checked[0], siz
 hk_checked = [a.text() for a in sub_actions(menu3)[0].menu().actions() if a.isChecked()]
 check("快捷键勾选当前值", hk_checked == ["ctrl+alt+z"], hk_checked)
 
+print("\n== 真正点菜单项（QAction.trigger）==")
+main._combo_free = lambda c: True
+menu4 = main.build_tray_menu(app)
+hk4, pal4, size4 = sub_actions(menu4)
+act_map = {a.text(): a for a in pal4.menu().actions()}
+act_map["和式"].trigger()
+check("点『和式』写进配置", read_cfg().get("palette") == "japanese",
+      read_cfg().get("palette"))
+smap = {a.text(): a for a in size4.menu().actions()}
+[lab for lab in smap if "126%" in lab][0:1] and smap[[lab for lab in smap if "126%" in lab][0]].trigger()
+check("点『大126%』写进配置", read_cfg().get("petal_size") == "large",
+      read_cfg().get("petal_size"))
+hmap = {a.text(): a for a in hk4.menu().actions()}
+hmap["alt+w"].trigger()
+check("点『alt+w』写进配置", read_cfg()["hotkeys"]["show_menu"] == "alt+w",
+      read_cfg()["hotkeys"].get("show_menu"))
+menu5 = main.build_tray_menu(app)
+_, pal5, size5 = sub_actions(menu5)
+check("重建后勾选和式",
+      [a.text() for a in pal5.menu().actions() if a.isChecked()] == ["和式"],
+      [a.text() for a in pal5.menu().actions() if a.isChecked()])
+check("重建后勾选大（126%）",
+      any(a.isChecked() and "126%" in a.text() for a in size5.menu().actions()))
+
 print("\n== 托盘图标跟随配色 ==")
 def top_pixel(icon):
     img = icon.pixmap(64, 64).toImage()
