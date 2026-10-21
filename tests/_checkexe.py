@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""非侵入检查：解包 exe 内嵌的字节码，确认 v9 的新功能真的进了包
+"""非侵入检查：解包 exe 内嵌的字节码，确认 v10 的新功能真的进了包
 
 用法：python _checkexe.py <目录>        # 目录里放 PetalMenu.exe（默认 dist_v9）
 """
@@ -7,14 +7,21 @@ import glob
 import os
 import sys
 
-HERE = sys.argv[1] if len(sys.argv) > 1 else r"C:\tmp\hotkey\dist_v9"
+HERE = sys.argv[1] if len(sys.argv) > 1 else r"C:\tmp\hotkey\dist_v10"
 log = lambda *a: print(*a, flush=True)
 
 WANT = {
     "petal_menu": ["_open_folder", "_in_center", "_draw_folder_glyph",
-                   "_draw_center_text", "_launch"],
+                   "_draw_center_text", "_launch",
+                   # v10：配色方案 + 花瓣大小
+                   "PALETTES", "PETAL_SIZES", "PETAL_SIZE_LABELS",
+                   "palette", "size_scale", "DEFAULT_PALETTE", "DEFAULT_PETAL_SIZE"],
     "main": ["CATEGORIES", "CATEGORY_LABEL", "DEFAULT_EXTS", "match_by_mode",
-             "detect_mode", "direct_open", "direct_open_auto", "_direct_open_async"],
+             "detect_mode", "direct_open", "direct_open_auto",
+             # v10：托盘设置菜单（_direct_open_async 已随『直接打开选中文件』删除）
+             "build_tray_menu", "apply_palette", "apply_petal_size",
+             "apply_show_hotkey", "_combo_free", "show_menu_combo",
+             "SHOW_HOTKEY_CHOICES"],
 }
 
 
@@ -78,10 +85,10 @@ if baks:
     old = baks[-1]
     code, err = code_of(old, "petal_menu")
     if not err:
-        ok = "_open_folder" not in markers(code)
-        print("  %s - 对照 %s 不含 _open_folder"
+        ok = "build_tray_menu" not in markers(code)
+        print("  %s - 对照 %s 不含 build_tray_menu"
               % ("PASS" if ok else "WARN", os.path.basename(old)), flush=True)
 
 print("\n==== 汇总 ====")
-print("打包产物含 v9 全部新功能" if not FAIL else "失败: %s" % FAIL, flush=True)
+print("打包产物含 v10 全部新功能" if not FAIL else "失败: %s" % FAIL, flush=True)
 sys.exit(1 if FAIL else 0)

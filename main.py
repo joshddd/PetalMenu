@@ -13,12 +13,15 @@ import queue
 import time
 
 import yaml
-from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
-from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor
+from PyQt6.QtWidgets import (QApplication, QSystemTrayIcon, QMenu,
+                             QInputDialog)
+from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QActionGroup
 from PyQt6.QtCore import QTimer, Qt
 
-from petal_menu import PetalMenu, COLORS
-from hotkey_hook import HotkeyManager
+from petal_menu import (PetalMenu, PALETTES, PETAL_SIZES,
+                        PETAL_SIZE_LABELS, palette as get_palette,
+                        DEFAULT_PALETTE, DEFAULT_PETAL_SIZE)
+from hotkey_hook import HotkeyManager, parse_combo
 
 # ---------------------------------------------------------------- 路径
 if getattr(sys, "frozen", False):
@@ -26,7 +29,7 @@ if getattr(sys, "frozen", False):
 else:
     EXE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-VERSION = "v9"
+VERSION = "v10"
 
 APP_DIR = os.path.join(os.environ.get("APPDATA", EXE_DIR), "PetalMenu")
 os.makedirs(APP_DIR, exist_ok=True)
@@ -122,6 +125,9 @@ _DEFAULT_CONFIG: dict = {"hotkeys": dict(DEFAULT_HOTKEYS)}
 _DEFAULT_CONFIG.update({ext_key: list(DEFAULT_EXTS[key])
                         for key, _label, ext_key in CATEGORIES})
 _DEFAULT_CONFIG["programs"] = {key: "" for key, _label, _e in CATEGORIES}
+# 外观（托盘右键菜单里可改）：配色方案 + 花瓣大小
+_DEFAULT_CONFIG["palette"] = DEFAULT_PALETTE
+_DEFAULT_CONFIG["petal_size"] = DEFAULT_PETAL_SIZE
 _DEFAULT_CONFIG["petal_count"] = 0
 _DEFAULT_CONFIG["petals"] = [
     {"name": "默认打开", "program": ""},
@@ -153,6 +159,11 @@ def load_config():
         new["programs"].setdefault(_key, "")
     new.setdefault("petal_count", 0)
     new.setdefault("petals", [])
+    # 外观键：老的配置文件里没有，顺便把写错的方案名纠正回默认值
+    if str(new.get("palette") or "") not in PALETTES:
+        new["palette"] = DEFAULT_PALETTE
+    if str(new.get("petal_size") or "") not in PETAL_SIZES:
+        new["petal_size"] = DEFAULT_PETAL_SIZE
     # 就地更新：保持 CONFIG 这个 dict 的身份不变，避免菜单/对话框里
     # 已经持有的 CONFIG["petals"] 旧列表变成"改了但存不进去"的孤儿对象。
     if isinstance(CONFIG, dict):
@@ -524,7 +535,10 @@ def listener_thread():
 
 # ---------------------------------------------------------------- 托盘
 
-def make_tray_icon():
+def make_tray_icon(palette_name=None):
+    """托盘图标：6 片花瓣 + 中心圆，颜色跟随当前配色方案"""
+    pal = get_palette(palette_name or CONFIG.get("palette"))
+    colors = pal["colors"]
     pm = QPixmap(64, 64)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
@@ -535,66 +549,179 @@ def make_tray_icon():
         p.save()
         p.rotate(i * 360 / n)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(COLORS[i % len(COLORS)]))
+        p.setBrush(QColor(colors[i % len(colors)]))
         p.drawEllipse(int(-8), int(-26), 16, 22)
         p.restore()
     p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(QColor(35, 35, 40))
+    p.setBrush(QColor(pal["center"]))
     p.drawEllipse(int(-9), int(-9), 18, 18)
     p.end()
     return QIcon(pm)
+
+
+# ---------------------------------------------------------------- 托盘设置
+
+# 呼出菜单的候选快捷键；菜单打开时会实时标注哪些被别的程序占用
+SHOW_HOTKEY_CHOICES = ("alt+z", "ctrl+alt+z", "ctrl+shift+z",
+                       "alt+q", "alt+w", "ctrl+alt+j")
+_HOTKEY_PROBE_SEQ = [0]
+
+
+def _combo_free(combo):
+    """试注册一次全局热键，看是否被别的程序占用（1409 = ERROR_HOTKEY_ALREADY_REGISTERED）。
+
+    我们自己的热键走 WH_KEYBOARD_LL 钩子、不占 RegisterHotKey，
+    所以这个探测探的是别的程序的占用情况，不会误判成自己。
+    """
+    try:
+        mods, vk = parse_combo(combo)
+    except Exception:
+        return False
+    u = ctypes.windll.user32
+    _HOTKEY_PROBE_SEQ[0] += 1
+    hid = 0xA000 + (_HOTKEY_PROBE_SEQ[0] % 0x0FFF)
+    ctypes.set_last_error(0)
+    ok = bool(u.RegisterHotKey(None, hid, mods, vk))
+    err = ctypes.get_last_error()
+    if ok:
+        u.UnregisterHotKey(None, hid)
+        return True
+    return err != 1409
+
+
+def show_menu_combo():
+    return str(CONFIG["hotkeys"].get("show_menu") or "").strip().lower()
+
+
+def apply_show_hotkey(combo):
+    """改「呼出花瓣菜单」的快捷键：写入配置 + 热更新钩子（不用重启）"""
+    combo = str(combo or "").strip().lower()
+    try:
+        parse_combo(combo)
+    except Exception as e:
+        notify("PetalMenu", f"快捷键无法识别：{e}")
+        return False
+    if combo != show_menu_combo() and not _combo_free(combo):
+        notify("PetalMenu", f"{combo} 已被其他程序占用，换一个")
+        return False
+    CONFIG["hotkeys"]["show_menu"] = combo
+    save_config()
+    _register_hotkeys()
+    _dbg("apply_show_hotkey: %s" % combo)
+    notify("PetalMenu", f"呼出快捷键已改为 {combo}")
+    return True
+
+
+def apply_palette(name):
+    if name not in PALETTES:
+        return False
+    CONFIG["palette"] = name
+    save_config()
+    if _TRAY is not None:
+        try:
+            _TRAY.setIcon(make_tray_icon(name))
+        except Exception:
+            pass
+    reshow_menu()
+    _dbg("apply_palette: %s" % name)
+    notify("PetalMenu", "配色方案：" + PALETTES[name]["label"])
+    return True
+
+
+def apply_petal_size(name):
+    if name not in PETAL_SIZES:
+        return False
+    CONFIG["petal_size"] = name
+    save_config()
+    reshow_menu()
+    _dbg("apply_petal_size: %s" % name)
+    notify("PetalMenu", "%s" % ("花瓣大小：" + str(PETAL_SIZE_LABELS.get(name, name))))
+    return True
+
+
+def _ask_custom_hotkey():
+    text, ok = QInputDialog.getText(
+        None, "呼出花瓣菜单的快捷键",
+        "输入组合键，例如 ctrl+alt+z、alt+q、f9：", text=show_menu_combo())
+    if ok and str(text or "").strip():
+        apply_show_hotkey(text)
+
+
+def build_tray_menu(app):
+    """托盘右键菜单：呼出快捷键 / 配色方案 / 花瓣大小 / 退出。
+
+    三个子菜单在父菜单弹出前重建，勾选状态始终等于 CONFIG 里的当前值。
+    """
+    menu = QMenu()
+    m_hk = menu.addMenu("呼出花瓣菜单的快捷键")
+    m_pal = menu.addMenu("配色方案")
+    m_size = menu.addMenu("花瓣大小")
+    menu.addSeparator()
+    act_quit = menu.addAction("退出")
+    act_quit.triggered.connect(app.quit)
+
+    def _fill_hotkeys():
+        m_hk.clear()
+        cur = show_menu_combo()
+        group = QActionGroup(m_hk)
+        group.setExclusive(True)
+        choices = ([cur] if cur else []) + [c for c in SHOW_HOTKEY_CHOICES if c != cur]
+        for combo in choices:
+            act = m_hk.addAction(combo)
+            act.setCheckable(True)
+            act.setChecked(combo == cur)
+            group.addAction(act)
+            if combo != cur and not _combo_free(combo):
+                act.setText(combo + "  （被占用）")
+                act.setEnabled(False)
+            act.triggered.connect(lambda _c=False, c=combo: apply_show_hotkey(c))
+        m_hk.addSeparator()
+        act_custom = m_hk.addAction("自定义…")
+        # 菜单回调里直接 exec() 模态框会被 popup 事件吃掉，延到菜单关掉之后
+        act_custom.triggered.connect(lambda: QTimer.singleShot(0, _ask_custom_hotkey))
+
+    def _fill_palettes():
+        m_pal.clear()
+        group = QActionGroup(m_pal)
+        group.setExclusive(True)
+        cur = CONFIG.get("palette")
+        for name, pal in PALETTES.items():
+            act = m_pal.addAction(pal["label"])
+            act.setCheckable(True)
+            act.setChecked(name == cur)
+            group.addAction(act)
+            act.triggered.connect(lambda _c=False, n=name: apply_palette(n))
+
+    def _fill_sizes():
+        m_size.clear()
+        group = QActionGroup(m_size)
+        group.setExclusive(True)
+        cur = CONFIG.get("petal_size")
+        for name, k in PETAL_SIZES.items():
+            label = "%s（%d%%）" % (PETAL_SIZE_LABELS.get(name, name),
+                                   int(round(k * 100)))
+            act = m_size.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(name == cur)
+            group.addAction(act)
+            act.triggered.connect(lambda _c=False, n=name: apply_petal_size(n))
+
+    def _on_show():
+        _fill_hotkeys()
+        _fill_palettes()
+        _fill_sizes()
+
+    menu.aboutToShow.connect(_on_show)
+    _on_show()
+    return menu
 
 
 def setup_tray(app):
     global _TRAY
     tray = QSystemTrayIcon(make_tray_icon(), app)
     tray.setToolTip("PetalMenu 花瓣菜单 " + VERSION)
+    tray.setContextMenu(build_tray_menu(app))
     _TRAY = tray
-
-    menu = QMenu()
-
-    def _direct_open_async(mode):
-        # 取选中文件要跑 PowerShell（最长 10s），别卡住托盘和 GUI 线程。
-        # 点托盘时前台窗口已经不是资源管理器了，用上次选中过的文件兜底。
-        job = (lambda: direct_open_auto(fallback=LAST_FILES)) if mode is None \
-            else (lambda: direct_open(mode, fallback=LAST_FILES))
-        threading.Thread(target=job, daemon=True).start()
-
-    sub = menu.addMenu("直接打开选中文件")
-    for _key, _label, _ext_key in CATEGORIES:
-        _combo = str(CONFIG["hotkeys"].get("open_" + _key) or "").strip()
-        _act = sub.addAction(_label + (("  [%s]" % _combo) if _combo else ""))
-        _act.triggered.connect(lambda _checked=False, k=_key: _direct_open_async(k))
-    sub.addSeparator()
-    _combo_auto = str(CONFIG["hotkeys"].get("open_auto") or "").strip()
-    _act_auto = sub.addAction("自动识别类型" + (("  [%s]" % _combo_auto) if _combo_auto else ""))
-    _act_auto.triggered.connect(lambda _checked=False: _direct_open_async(None))
-
-    menu.addSeparator()
-    act_reload = menu.addAction("重新加载配置")
-    act_open_cfg = menu.addAction("打开配置目录")
-    menu.addSeparator()
-    act_quit = menu.addAction("退出")
-
-    def _reload():
-        try:
-            load_config()
-            _register_hotkeys()
-            notify("PetalMenu", "配置已重新加载（含热键）")
-        except Exception as e:
-            notify("PetalMenu", f"配置加载失败：{e}")
-
-    def _open_cfg():
-        os.startfile(APP_DIR)
-
-    def _quit():
-        app.quit()
-
-    act_reload.triggered.connect(_reload)
-    act_open_cfg.triggered.connect(_open_cfg)
-    act_quit.triggered.connect(_quit)
-
-    tray.setContextMenu(menu)
     tray.show()
 
 # ---------------------------------------------------------------- 主流程
@@ -624,7 +751,9 @@ def show_menu_for(files):
             pass
         CURRENT_MENU = None
     CURRENT_MENU = PetalMenu(files, CONFIG.get("petals", []),
-                             petal_count=CONFIG.get("petal_count", 0))
+                             petal_count=CONFIG.get("petal_count", 0),
+                             palette_name=CONFIG.get("palette"),
+                             size_name=CONFIG.get("petal_size"))
     if not CURRENT_MENU.show_at_cursor():
         CURRENT_MENU = None
 

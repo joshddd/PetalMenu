@@ -12,11 +12,29 @@ Windows 上的 PyQt6 放射状「花瓣」菜单：在资源管理器里选中�
 - 每类可以配一个「直开」热键（`programs.<类别>` 指定的程序）；`open_auto` 会自动判断类型再选程序，
   认不出的类型交给系统默认打开
 - 左键点花瓣中心 → 在资源管理器里打开文件所在目录（同时选中该文件）
-- 自绘放射状菜单，带展开动画和配色（`COLORS`）
+- 自绘放射状菜单，带展开动画、五套配色方案、四档花瓣大小
+- 托盘图标右键 → 设置菜单：呼出快捷键 / 配色方案 / 花瓣大小，全部即时生效并写回配置
 - 右键中心花瓣 → 设置花瓣数量（`0` = 显示全部匹配项；`N` = 取前 N 个）
 - 已配置的打开方式不足 N 个时自动补「未配置」占位花瓣（灰底虚线），右键占位花瓣即可现场绑定程序并写回配置
-- 托盘常驻，支持热键运行中热更新
+- 托盘常驻：右键只有三项设置 + 「退出」，热键改完立刻热更新，不用重启
 - 配置持久化在 `%APPDATA%\PetalMenu\config.yaml`，首次启动自动生成，可从 exe 同级目录迁移旧配置
+
+## 托盘右键设置
+
+右键任务栏图标：
+
+```
+呼出花瓣菜单的快捷键 ▸  alt+z / ctrl+alt+z / ctrl+shift+z / alt+q / alt+w / ctrl+alt+j / 自定义…
+配色方案 ▸              经典 / 中式 / 和式 / 莫兰迪 / 清新
+花瓣大小 ▸              小 78% / 标准 100% / 大 126% / 特大 155%
+───────────────────────
+退出
+```
+
+- 快捷键列表里被别的程序占用的组合会标「（被占用）」并置灰，选中即时重注册；
+  想用自己的组合就点「自定义…」手输（如 `ctrl+alt+z`、`f9`）
+- 配色和大小改完立刻重画菜单并写回 `config.yaml`，托盘图标颜色也会跟着换
+- 设置只作用于「呼出花瓣菜单」这一个热键；`open_*` 那组直开热键仍在 `config.yaml` 里配
 
 ## 选择来源
 
@@ -52,7 +70,7 @@ hotkeys:
   show_menu: alt+z
   open_video: "ctrl+alt+v"
   open_image: "ctrl+alt+p"
-  open_document: ""        # 留空 = 这一类不注册热键（托盘菜单里仍可点）
+  open_document: ""        # 留空 = 这一类不注册直开热键
   open_audio: ""
   open_archive: ""
   open_disc: ""
@@ -73,6 +91,9 @@ programs:                  # 各类别的「直开」程序，空 = 系统默认
   audio: ''
   archive: ''              # 例如 'C:\Program Files\7-Zip\7zFM.exe'
   disc: ''
+
+palette: classic        # 配色：classic 经典 / chinese 中式 / japanese 和式 / morandi 莫兰迪 / fresh 清新
+petal_size: normal      # 花瓣大小：small 78% / normal 100% / large 126% / xlarge 155%
 
 petal_count: 3          # 0 = 全部；N = 前 N 个（不足补占位花瓣）
 
@@ -117,5 +138,6 @@ if vk != VK_PACKET and flags & fake_alt != fake_alt:
 - 仅 Windows（依赖 Win32 钩子、`CabinetWClass` / Everything 窗口探测）
 - `alt+x`、`ctrl+alt+p`、`win+b` 等组合在部分机器上已被占用或与系统行为冲突，换热键前先确认空闲
   （`tests/_hkfree.py` 会逐个试 `RegisterHotKey`，直接报出哪个被占用）
-- 配置里留空的直开热键不会被注册；没热键的类别仍可从托盘菜单「直接打开选中文件」触发
+- 配置里留空的直开热键不会被注册，也不会出现在任何菜单里——要用就先在 `config.yaml` 的
+  `hotkeys.open_<类别>` 填一个组合键（托盘菜单只管「呼出花瓣菜单」这一个热键）
 - Everything 模式下若索引过期，拼出的完整路径会指向旧文件名，需要重建 Everything 索引

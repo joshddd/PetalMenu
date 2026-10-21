@@ -122,6 +122,10 @@ programs:
   archive: ''
   disc: ''
 petal_count: 3
+# 外观：配色方案 classic/chinese/japanese/morandi/fresh，花瓣大小 small/normal/large/xlarge
+# 这两项可以在托盘图标右键菜单里直接改，改完立即生效
+palette: classic
+petal_size: normal
 petals:
 - name: 默认打开
   program: C:/Program Files/VideoLAN/VLC/vlc.exe

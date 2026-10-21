@@ -27,11 +27,74 @@ R_INNER  = 32
 R_OUTER  = 118
 GAP_DEG  = 5
 DURATION = 160
-COLORS = [
-    "#6FA8DC", "#93C47D", "#F6B26B", "#E06666",
-    "#8E7CC3", "#FFD966", "#76A5AF", "#C27BA0",
-]
+
+# 配色方案：colors 按花瓣顺序循环取色；text 是花瓣文字色；
+# center/center_text 是中心圆底色与中心文字；ph_* 是「未配置」占位花瓣的描边/填充。
+PALETTES = {
+    "classic": {
+        "label": "经典",
+        "colors": ["#6FA8DC", "#93C47D", "#F6B26B", "#E06666",
+                   "#8E7CC3", "#FFD966", "#76A5AF", "#C27BA0"],
+        "text": "#FFFFFF", "center": "#232328", "center_text": "#FFFFFF",
+        "ph_border": "#D2D2DC", "ph_fill": "#464650",
+    },
+    "chinese": {
+        "label": "中式",
+        "colors": ["#C0392B", "#D4AF37", "#2F4554", "#8C6A4A",
+                   "#7FA99B", "#B03A2E", "#3B3A36", "#C99A5B"],
+        "text": "#FFF6E9", "center": "#2B2B28", "center_text": "#F5E6C8",
+        "ph_border": "#C8B99A", "ph_fill": "#4A443A",
+    },
+    "japanese": {
+        "label": "和式",
+        "colors": ["#E8A0A8", "#4B6E8F", "#7BA05B", "#E3B04B",
+                   "#9B8AC4", "#C85B4A", "#A8C7CE", "#8E9C8B"],
+        "text": "#FFFFFF", "center": "#262A2E", "center_text": "#F2E9DC",
+        "ph_border": "#C6C2B8", "ph_fill": "#454850",
+    },
+    "morandi": {
+        "label": "莫兰迪",
+        "colors": ["#B5A99B", "#A3B1A1", "#9FA8B8", "#C2A9A1",
+                   "#BFC0B4", "#8E9A9E", "#C7BDAF", "#A99FA8"],
+        "text": "#FFFFFF", "center": "#3A3A3C", "center_text": "#EFEAE4",
+        "ph_border": "#CFC8C0", "ph_fill": "#4C4A48",
+    },
+    "fresh": {
+        "label": "清新",
+        "colors": ["#7ED3B2", "#7FC8F8", "#FFD97D", "#FF9B85",
+                   "#A0E7E5", "#B4F8C8", "#FBE7C6", "#C1E1C1"],
+        "text": "#37474F", "center": "#2E3B3F", "center_text": "#EAF7F4",
+        "ph_border": "#BBD9CF", "ph_fill": "#4A5A5E",
+    },
+}
+DEFAULT_PALETTE = "classic"
+
+# 花瓣大小：整体等比缩放（半径、字号、留白一起缩放）
+PETAL_SIZES = {"small": 0.78, "normal": 1.0, "large": 1.26, "xlarge": 1.55}
+PETAL_SIZE_LABELS = {"small": "小", "normal": "标准", "large": "大", "xlarge": "特大"}
+DEFAULT_PETAL_SIZE = "normal"
+
+COLORS = PALETTES[DEFAULT_PALETTE]["colors"]
+
 PLACEHOLDER_NAME = "未配置"
+
+
+def palette(name):
+    """按名字取配色方案；名字不认识就退回经典配色"""
+    return PALETTES.get(str(name or ""), PALETTES[DEFAULT_PALETTE])
+
+
+def palette_names():
+    return list(PALETTES.keys())
+
+
+def size_scale(name):
+    """按名字取缩放系数；名字不认识就按标准大小"""
+    try:
+        return float(PETAL_SIZES.get(str(name or ""), 1.0))
+    except Exception:
+        return 1.0
+
 
 # 非模态对话框必须有人引用，否则会被 Python GC 掉（窗口瞬间消失）
 _OPEN_DIALOGS = set()
@@ -280,7 +343,8 @@ class SetCountDialog(QDialog):
 # ---------------------------------------------------------------- 主控件
 
 class PetalMenu(QWidget):
-    def __init__(self, files, petals, petal_count=0, parent=None):
+    def __init__(self, files, petals, petal_count=0, parent=None,
+                 palette_name=None, size_name=None):
         super().__init__(parent)
         self.files = list(files)
         self._scale = 0.0
@@ -288,11 +352,15 @@ class PetalMenu(QWidget):
         self._center_hover = False             # 光标是不是停在中心（决定中心画提示还是图标）
         self._all_petals_cfg = petals          # 原始配置（用于回写）
         self._petal_count = petal_count or 0
+        self._pal = palette(palette_name)      # 配色方案
+        self._k = size_scale(size_name)        # 花瓣大小缩放系数
+        self.r_in = R_INNER * self._k
+        self.r_out = R_OUTER * self._k
 
         # 先按 exts 过滤再取前 N 个，不足则补占位花瓣
         self.petals = build_petals(petals, self.files, self._petal_count)
 
-        self._size = 2 * (R_OUTER + 36)
+        self._size = int(round(2 * (self.r_out + 36 * self._k)))
         self.setFixedSize(self._size, self._size)
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -337,7 +405,7 @@ class PetalMenu(QWidget):
         dx, dy = pos.x() - c, pos.y() - c
         scale = self._scale if self._scale > 0.001 else 1.0
         r = math.hypot(dx, dy) / scale
-        if not (R_INNER < r < R_OUTER):
+        if not (self.r_in < r < self.r_out):
             return -1
         if not self.petals:
             return -1
@@ -349,7 +417,7 @@ class PetalMenu(QWidget):
         dx, dy = pos.x() - c, pos.y() - c
         scale = self._scale if self._scale > 0.001 else 1.0
         r = math.hypot(dx, dy) / scale
-        return r <= R_INNER
+        return r <= self.r_in
 
     def _open_folder(self):
         """左键点中心：在资源管理器里打开文件所在目录（多选时取第一个）"""
@@ -606,15 +674,16 @@ class PetalMenu(QWidget):
             a0 = i * span + GAP_DEG / 2
             a1 = (i + 1) * span - GAP_DEG / 2
             ph = bool(petal.get("_placeholder"))
-            path = _sector_path(a0, a1, R_INNER, R_OUTER)
+            path = _sector_path(a0, a1, self.r_in, self.r_out)
             if ph:
-                pen = QPen(QColor(210, 210, 220, 110))
+                pen = QPen(QColor(self._pal["ph_border"]))
                 pen.setWidth(2)
                 pen.setStyle(Qt.PenStyle.DashLine)
                 painter.setPen(pen)
-                painter.setBrush(QColor(70, 70, 80, 120))
+                painter.setBrush(QColor(self._pal["ph_fill"]))
             else:
-                color = QColor(COLORS[i % len(COLORS)])
+                colors = self._pal["colors"]
+                color = QColor(colors[i % len(colors)])
                 if i == self.hover:
                     color = color.lighter(130)
                 painter.setPen(Qt.PenStyle.NoPen)
@@ -622,23 +691,29 @@ class PetalMenu(QWidget):
             painter.drawPath(path)
 
             mid = (a0 + a1) / 2
-            tx, ty = _pt(mid, (R_INNER + R_OUTER) / 2)
+            tx, ty = _pt(mid, (self.r_in + self.r_out) / 2)
             painter.save()
             painter.translate(tx, ty)
-            painter.rotate(-mid)
-            painter.setPen(QColor("white") if not ph else QColor(220, 220, 230))
-            font = QFont("Microsoft YaHei UI", 11)
+            ang = -mid
+            # 左半圈和下半个圈按 -mid 转出来是倒着的，补 180° 让文字始终朝上
+            if 90 < (mid % 360) < 270:
+                ang += 180
+            painter.rotate(ang)
+            painter.setPen(QColor(self._pal["text"]))
+            font = QFont("Microsoft YaHei UI", max(6, int(round(11 * self._k))))
             font.setBold(True)
             painter.setFont(font)
             text = ("＋" + PLACEHOLDER_NAME) if ph else petal["name"]
-            painter.drawText(QRectF(-72, -14, 144, 28),
+            half_w = 72 * self._k
+            half_h = 14 * self._k
+            painter.drawText(QRectF(-half_w, -half_h, 2 * half_w, 2 * half_h),
                              int(Qt.AlignmentFlag.AlignCenter), text)
             painter.restore()
 
         # 中心圆
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(35, 35, 40, 235))
-        cr = R_INNER - 4
+        painter.setBrush(QColor(self._pal["center"]))
+        cr = self.r_in - 4 * self._k
         painter.drawEllipse(QRectF(-cr, -cr, 2 * cr, 2 * cr))
 
         # 中心提示：hover 花瓣名 / 中心可点（打开所在目录）
@@ -650,11 +725,11 @@ class PetalMenu(QWidget):
             self._draw_center_text(painter, "打开方式", cr)
 
     def _draw_center_text(self, painter, name, cr):
-        font = QFont("Microsoft YaHei UI", 10)
+        font = QFont("Microsoft YaHei UI", max(6, int(round(10 * self._k))))
         painter.setFont(font)
         fm = QFontMetrics(font)
         text = fm.elidedText(name, Qt.TextElideMode.ElideRight, int(2 * cr - 8))
-        painter.setPen(QColor("white"))
+        painter.setPen(QColor(self._pal["center_text"]))
         painter.drawText(QRectF(-cr, -cr, 2 * cr, 2 * cr),
                          int(Qt.AlignmentFlag.AlignCenter), text)
 
