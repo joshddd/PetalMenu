@@ -24,5 +24,10 @@ if debug:
 subprocess.Popen([exe], env=env, creationflags=0x00000008)
 time.sleep(4)
 print("exe:", exe, "exists:", os.path.exists(exe))
-print("hook.log:", open(log, encoding="utf-8", errors="replace").read().strip()
-      if os.path.exists(log) else "(none)")
+if os.path.exists(log):
+    tail = open(log, encoding="utf-8", errors="replace").read().splitlines()[-8:]
+    print("hook.log tail(%d lines):" % len(tail))
+    for line in tail:
+        print("  " + line)
+else:
+    print("hook.log: (none)")
